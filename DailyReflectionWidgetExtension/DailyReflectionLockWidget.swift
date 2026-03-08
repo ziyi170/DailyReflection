@@ -41,6 +41,8 @@ struct LockScreenWidgetView: View {
             RectangularLockView(entry: entry)
         case .accessoryInline:
             InlineLockView(entry: entry)
+        case .systemSmall, .systemMedium, .systemLarge, .systemExtraLarge:
+            EmptyView()
         @unknown default:
             EmptyView()
         }
@@ -97,8 +99,11 @@ struct RectangularLockView: View {
         return Double(entry.completedCount) / Double(entry.tasks.count)
     }
     
-    private var nextTask: WidgetTask? {
-        entry.tasks.first(where: { !$0.isCompleted })
+    // ✅ 当前正在进行的任务（按时间匹配）
+    private var currentTask: WidgetTask? {
+        let now = Date()
+        return entry.tasks.first(where: { !$0.isCompleted && $0.startTime <= now })
+            ?? entry.tasks.first(where: { !$0.isCompleted })
     }
     
     private var isCompleted: Bool {
@@ -106,36 +111,42 @@ struct RectangularLockView: View {
     }
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 4) {
+            // 第一行：标题 + 进度数字
             HStack {
                 Image(systemName: isCompleted ? "checkmark.circle.fill" : "circle.dotted")
                     .foregroundColor(isCompleted ? .green : .cyan)
-                
-                Text("今日任务")
-                    .font(.system(size: 14, weight: .semibold))
-                
+                    .font(.system(size: 12))
+                Text(isCompleted ? "全部完成 🎉" : "今日任务")
+                    .font(.system(size: 13, weight: .semibold))
                 Spacer()
-                
                 Text("\(entry.completedCount)/\(entry.tasks.count)")
-                    .font(.system(size: 14, weight: .bold))
+                    .font(.system(size: 13, weight: .bold))
                     .foregroundColor(isCompleted ? .green : .primary)
             }
             
+            // 第二行：进度条
             ProgressView(value: progress)
                 .progressViewStyle(.linear)
                 .tint(isCompleted ? .green : .cyan)
             
-            if let task = nextTask {
-                Text(task.title)
-                    .font(.system(size: 11))
-                    .lineLimit(1)
-                    .foregroundColor(.secondary)
+            // 第三行：当前任务名（核心信息）
+            if let task = currentTask {
+                HStack(spacing: 4) {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 9))
+                        .foregroundColor(.cyan)
+                    Text(task.title)
+                        .font(.system(size: 11, weight: .medium))
+                        .lineLimit(1)
+                        .foregroundColor(.primary)
+                }
             } else if isCompleted {
-                Text("🎉 全部完成！")
+                Text("今日任务全部完成！")
                     .font(.system(size: 11))
                     .foregroundColor(.green)
             } else {
-                Text("暂无任务")
+                Text("暂无进行中的任务")
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
             }

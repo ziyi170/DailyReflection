@@ -1,12 +1,14 @@
 import Foundation
 
-struct Task: Identifiable, Codable, Equatable {
+struct DailyTask: Identifiable, Codable, Equatable, NotifiableTask {
     let id: UUID
     var title: String
     var startTime: Date
     var duration: Double  // 🔧 统一使用分钟（不是秒）
     var isCompleted: Bool
     
+    var deadlineDate: Date? { nil }  // NotifiableTask 协议，普通任务无截止日
+
     var actualStartTime: Date?
     var actualEndTime: Date?
     var notes: String

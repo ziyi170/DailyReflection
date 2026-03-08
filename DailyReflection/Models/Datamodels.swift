@@ -89,7 +89,7 @@ struct Reflection: Identifiable, Codable {
 struct CalendarEvent: Identifiable {
     var id = UUID()
     var date: Date
-    var tasks: [Task]
+    var tasks: [DailyTask]
     var meals: [MealEntry]
     var weight: WeightEntry?
     var reflection: Reflection?

@@ -430,6 +430,14 @@ struct AddMealView: View {
     @State private var name = ""
     @State private var calories = ""
     @State private var description = ""
+    @State private var selectedMealType: MealEntry.MealType
+    
+    init(isPresented: Binding<Bool>, selectedDate: Date, mealType: MealEntry.MealType) {
+        self._isPresented = isPresented
+        self.selectedDate = selectedDate
+        self.mealType = mealType
+        self._selectedMealType = State(initialValue: mealType)
+    }
     
     var body: some View {
         NavigationView {
@@ -442,8 +450,14 @@ struct AddMealView: View {
                 }
                 
                 Section("餐次") {
-                    Text(mealType.rawValue)
-                        .foregroundColor(.secondary)
+                    Picker("选择餐次", selection: $selectedMealType) {
+                        ForEach(MealEntry.MealType.allCases, id: \.self) { type in
+                            Label(type.rawValue, systemImage: type.icon)
+                                .tag(type)
+                        }
+                    }
+                    .pickerStyle(.wheel)
+                    .frame(height: 120)
                 }
             }
             .navigationTitle("添加饮食")
@@ -470,7 +484,7 @@ struct AddMealView: View {
         let meal = MealEntry(
             name: name,
             calories: calorieValue,
-            mealType: mealType,
+            mealType: selectedMealType,
             date: selectedDate,
             description: description
         )

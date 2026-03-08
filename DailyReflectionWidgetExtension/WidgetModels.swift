@@ -74,7 +74,7 @@ struct TaskProvider: TimelineProvider {
     
     // MARK: - 数据加载（从 App Group 读）
     private func loadTasks() -> [WidgetTask] {
-        guard let sharedDefaults = UserDefaults(suiteName: "group.com.dailyreflection.shared"),
+        guard let sharedDefaults = UserDefaults(suiteName: "group.com.yourapp.dailyreflection"),
               let data = sharedDefaults.data(forKey: "tasks"),
               let tasks = try? JSONDecoder().decode([WidgetTask].self, from: data) else {
             return []
@@ -93,12 +93,12 @@ struct TaskProvider: TimelineProvider {
     }
     
     private func loadMood() -> String {
-        UserDefaults(suiteName: "group.com.dailyreflection.shared")?
+        UserDefaults(suiteName: "group.com.yourapp.dailyreflection")?
             .string(forKey: "currentMood") ?? "平静"
     }
     
     private func loadUsername() -> String {
-        UserDefaults(suiteName: "group.com.dailyreflection.shared")?
+        UserDefaults(suiteName: "group.com.yourapp.dailyreflection")?
             .string(forKey: "username") ?? "用户"
     }
 }
@@ -121,4 +121,3 @@ extension View {
 //
 //  Created by 小艺 on 2026/2/5.
 //
-

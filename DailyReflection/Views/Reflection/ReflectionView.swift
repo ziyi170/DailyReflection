@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ReflectionView: View {
-    @State private var tasks: [Task] = []
+    @State private var tasks: [DailyTask] = []
     @State private var reflections: [DailyReflection] = []
     @State private var selectedDate = Date()
     @State private var expandedTaskId: UUID?
@@ -19,12 +19,12 @@ struct ReflectionView: View {
         }
     }
     
-    var todayTasks: [Task] {
+    var todayTasks: [DailyTask] {
         tasks.filter { Calendar.current.isDate($0.startTime, inSameDayAs: selectedDate) }
             .sorted { $0.startTime < $1.startTime }
     }
     
-    var completedTasks: [Task] {
+    var completedTasks: [DailyTask] {
         todayTasks.filter { $0.isCompleted }
     }
     
@@ -220,7 +220,7 @@ struct ReflectionView: View {
     // MARK: - 数据加载
     func loadData() {
         if let savedTasks = UserDefaults.standard.data(forKey: "tasks"),
-           let decoded = try? JSONDecoder().decode([Task].self, from: savedTasks) {
+           let decoded = try? JSONDecoder().decode([DailyTask].self, from: savedTasks) {
             tasks = decoded
         }
         
@@ -292,14 +292,14 @@ struct ReflectionView: View {
 
 // MARK: - 任务复盘行组件
 struct ReflectionTaskRow: View {
-    let task: Task
+    let task: DailyTask
     let isExpanded: Bool
     let onTap: () -> Void
     let onNotesChange: (String) -> Void
     
     @State private var reflectionText: String
     
-    init(task: Task, isExpanded: Bool, onTap: @escaping () -> Void, onNotesChange: @escaping (String) -> Void) {
+    init(task: DailyTask, isExpanded: Bool, onTap: @escaping () -> Void, onNotesChange: @escaping (String) -> Void) {
         self.task = task
         self.isExpanded = isExpanded
         self.onTap = onTap

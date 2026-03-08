@@ -2,8 +2,11 @@ import SwiftUI
 import AuthenticationServices
 
 struct ProfileView: View {
-    @StateObject private var authManager = AuthenticationManager.shared
-    @State private var isPro = false
+    @ObservedObject private var authManager = AuthenticationManager.shared
+    @ObservedObject private var sub = SubscriptionManager.shared
+    @State private var showPricing = false
+
+    private var isPro: Bool { sub.currentTier >= .pro }
     
     var body: some View {
         NavigationView {
@@ -45,24 +48,32 @@ struct ProfileView: View {
                 
                 // 订阅状态卡片
                 Section {
-                    NavigationLink(destination: SubscriptionView()) {
+                    Button { showPricing = true } label: {
                         HStack {
                             Image(systemName: isPro ? "crown.fill" : "crown")
                                 .foregroundColor(isPro ? .yellow : .gray)
                                 .font(.title2)
                             
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(isPro ? "Pro会员" : "免费版")
+                                Text(sub.tierDisplayName)
                                     .font(.headline)
-                                Text(isPro ? "感谢您的支持" : "升级解锁全部功能")
+                                    .foregroundColor(.primary)
+                                Text(isPro ? sub.expirationText : "升级解锁全部功能")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                             }
                             
                             Spacer()
+                            
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 13))
+                                .foregroundColor(.secondary)
                         }
                         .padding(.vertical, 8)
                     }
+                }
+                .sheet(isPresented: $showPricing) {
+                    PricingSheet(trigger: .manual)
                 }
                 
                 // 个性化

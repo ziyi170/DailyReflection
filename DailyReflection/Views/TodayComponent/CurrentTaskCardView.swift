@@ -8,7 +8,7 @@ import SwiftUI
 import Combine
 
 struct CurrentTaskCard: View {
-    let task: Task
+    let task: DailyTask
     let onStart: () -> Void
     let onComplete: () -> Void
     let onToggleWhiteNoise: () -> Void

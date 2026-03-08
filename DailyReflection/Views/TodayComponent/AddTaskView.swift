@@ -26,6 +26,9 @@ struct AddTaskView: View {
     // 🆕 键盘控制
     @FocusState private var focusedField: Field?
 
+    // 任务开始提醒开关（与通知设置页联动）
+    @AppStorage("taskReminderEnabled") private var taskReminderEnabled = true
+
     // 🆕 是否使用上一个任务的结束时间
     @State private var useLastTaskEndTime = false
 
@@ -285,7 +288,7 @@ struct AddTaskView: View {
         let expenseValue = Double(expense) ?? 0.0
 
         // ✅ 存进去的 duration 就是分钟
-        let newTask = Task(
+        let newTask = DailyTask(
             title: title,
             startTime: startTime,
             duration: duration,
@@ -301,6 +304,11 @@ struct AddTaskView: View {
 
         // ✅ 关键：统一入口（会同步日历 + Widget + Live Activity + 保存）
         dataManager.addTask(newTask)//连贯点
+
+        // ✅ 任务开始前 15 分钟本地通知（受设置页开关控制）
+        if taskReminderEnabled {
+            NotificationManager.shared.scheduleTaskNotification(for: newTask)
+        }
 
         whiteNoiseManager.stop()
         onSave()

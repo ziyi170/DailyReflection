@@ -190,11 +190,30 @@ struct CaloriesSummaryBox: View {
     let burned: Double
     let consumed: Double
     let net: Double
+    /// 是否包含 AI 自动估算的数据（用于显示提示标注）
+    var hasEstimated: Bool = false
 
     var body: some View {
         DSCard {
             VStack(alignment: .leading, spacing: 14) {
-                sectionLabel("卡路里统计", icon: "flame.fill", color: DS.orange)
+                // 标题行：如有估算数据，附加说明标签
+                HStack(spacing: 6) {
+                    Image(systemName: "flame.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(DS.orange)
+                    Text("卡路里统计")
+                        .font(DS.T.cardTitle)
+                        .foregroundColor(.secondary)
+                    if hasEstimated {
+                        Text("含AI估算")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(DS.purple)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(DS.purple.opacity(0.1))
+                            .cornerRadius(4)
+                    }
+                }
 
                 HStack(spacing: 0) {
                     metricItem(label: "消耗", value: "\(Int(burned))", unit: "卡", color: DS.orange)
@@ -207,6 +226,17 @@ struct CaloriesSummaryBox: View {
 
                 netRow(label: "净消耗", value: "\(Int(net)) 卡",
                        positive: net >= 0, positiveColor: DS.blue)
+
+                if hasEstimated {
+                    HStack(spacing: 4) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 10))
+                            .foregroundColor(DS.purple)
+                        Text("未填写卡路里的任务已由 AI 根据标题和时长自动估算")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
+                }
             }
         }
     }

@@ -1,4 +1,5 @@
 //  TaskListView.swift + TaskRowView.swift (合并，统一 DS 规范)
+//  ✅ 修复 onChange deprecated 警告
 import SwiftUI
 
 // ============================================================
@@ -10,12 +11,12 @@ import SwiftUI
 // MARK: - TaskListView（签名保留兼容，样式统一）
 // ============================================================
 struct TaskListView: View {
-    let tasks: [Task]
-    let onToggle: (Task) -> Void
-    let onTap: (Task) -> Void
-    let onStart: (Task) -> Void
-    let onDelete: (Task) -> Void
-    let onEdit: (Task) -> Void
+    let tasks: [DailyTask]
+    let onToggle: (DailyTask) -> Void
+    let onTap: (DailyTask) -> Void
+    let onStart: (DailyTask) -> Void
+    let onDelete: (DailyTask) -> Void
+    let onEdit: (DailyTask) -> Void
     let currentTaskId: UUID?
     let mood: String
     let username: String
@@ -79,7 +80,8 @@ struct TaskListView: View {
                 LiveActivityManager.shared.start(tasks: tasks, mood: mood, username: username)
             }
         }
-        .onChange(of: tasks.count) { _ in
+        // ✅ 修复：去掉 _ in，改为零参数 closure（iOS 17+）
+        .onChange(of: tasks.count) {
             if tasks.isEmpty { LiveActivityManager.shared.stop() }
             else { LiveActivityManager.shared.update(tasks: tasks, mood: mood) }
         }

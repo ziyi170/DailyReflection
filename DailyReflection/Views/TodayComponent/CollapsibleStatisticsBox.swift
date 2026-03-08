@@ -58,7 +58,8 @@ struct CollapsibleStatisticsBox: View {
                     CaloriesSummaryBox(
                         burned: calculations.totalCaloriesBurned,
                         consumed: calculations.totalCaloriesConsumed,
-                        net: calculations.netCalories
+                        net: calculations.netCalories,
+                        hasEstimated: calculations.hasEstimatedCalories
                     )
                 }
                 .padding(.horizontal, DS.padding)

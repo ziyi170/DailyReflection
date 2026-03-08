@@ -12,7 +12,7 @@ final class TimerManager: ObservableObject {
     @Published var totalTime: TimeInterval = 0
     @Published var isRunning = false
     @Published var isPaused = false
-    @Published var currentTask: Task?
+    @Published var currentTask: DailyTask?
 
     private var timer: Timer?
 
@@ -29,7 +29,7 @@ final class TimerManager: ObservableObject {
 
     // MARK: - 计时器控制
 
-    func startTimer(duration: TimeInterval, for task: Task? = nil) {
+    func startTimer(duration: TimeInterval, for task: DailyTask? = nil) {
         totalTime = duration
         timeRemaining = duration
         isRunning = true
@@ -79,6 +79,19 @@ final class TimerManager: ObservableObject {
         saveTimerState()
         WhiteNoiseManager.shared.stop()
         endLiveActivityIfAvailable()
+    }
+
+    /// 当用户在任务列表手动勾选完成时调用。
+    /// 如果计时器正在为该任务（或无绑定任务）计时，则走完整完成流程：发通知 + 停止。
+    func completeForTask(_ task: DailyTask) {
+        // 计时器未运行时不处理
+        guard isRunning else { return }
+        // 绑定了其他任务时不打断
+        if let bound = currentTask, bound.id != task.id { return }
+
+        let completedTask = currentTask ?? task
+        stopTimer()
+        sendCompletionNotification(for: completedTask)
     }
 
     // MARK: - Tick（⚠️ 这里是之前的雷点）
@@ -146,7 +159,7 @@ final class TimerManager: ObservableObject {
         isPaused = defaults.bool(forKey: "timerIsPaused")
 
         if let data = defaults.data(forKey: "timerCurrentTask"),
-           let task = try? JSONDecoder().decode(Task.self, from: data) {
+           let task = try? JSONDecoder().decode(DailyTask.self, from: data) {
             currentTask = task
         }
 
@@ -268,7 +281,7 @@ final class TimerManager: ObservableObject {
 
     // MARK: - 通知
 
-    private func sendCompletionNotification(for task: Task?) {
+    private func sendCompletionNotification(for task: DailyTask?) {
         let content = UNMutableNotificationContent()
         content.title = "专注时间结束 🎉"
         content.body = task != nil

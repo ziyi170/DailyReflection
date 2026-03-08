@@ -1,4 +1,8 @@
 //  TodayView.swift
+//  ✅ 字体统一 DS 规范版本
+//  ✅ 日历同步 toggleTaskCompletion / deleteTask Bug 修复
+//  ✅ 修复 onChange deprecated 警告 + MainActor isolation 警告
+
 import SwiftUI
 import Charts
 
@@ -7,10 +11,11 @@ struct TodayView: View {
     @StateObject private var whiteNoiseManager = WhiteNoiseManager.shared
     @StateObject private var timerManager = TimerManager.shared
     @StateObject private var syncManager = CalendarSyncManager.shared
+    @StateObject private var calorieCalculationManager = CalorieCalculationManager.shared
 
     @State private var showingAddTask = false
     @State private var showingSmartAdd = false
-    @State private var editingTask: Task?
+    @State private var editingTask: DailyTask?
     @State private var selectedDate = Date()
     @State private var showCalendar = false
 
@@ -20,6 +25,10 @@ struct TodayView: View {
     @FocusState private var focusedField: ReflectionField?
     @State private var hasAutoStartedLiveActivity = false
 
+    // ✅ 每30秒 tick 一次，驱动 currentTask 自动切换 + UI 刷新
+    @State private var clockTick = Date()
+    @State private var clockTimer: Timer? = nil
+
     enum ReflectionField: Hashable { case yesterday, today, tomorrow }
 
     var body: some View {
@@ -27,7 +36,6 @@ struct TodayView: View {
             ScrollView {
                 VStack(spacing: 12) {
 
-                    // 进度横幅（有任务才显示）
                     if !todayTasks.isEmpty, let calc = cachedCalculations {
                         TaskProgressBanner(
                             completedTasks: calc.completedTasks,
@@ -38,7 +46,6 @@ struct TodayView: View {
                         .padding(.top, 4)
                     }
 
-                    // 日历入口卡片
                     CalendarEntryCard(
                         selectedDate: $selectedDate,
                         dataManager: dataManager,
@@ -46,16 +53,13 @@ struct TodayView: View {
                     )
                     .padding(.horizontal)
 
-                    // 任务列表卡片
                     taskListCard.padding(.horizontal)
 
-                    // 统计
                     if let calc = cachedCalculations {
                         CollapsibleStatisticsBox(isExpanded: $isStatisticsExpanded, calculations: calc)
                             .padding(.horizontal)
                     }
 
-                    // 反思
                     CollapsibleReflectionBox(
                         isExpanded: $isReflectionExpanded,
                         yesterdayPlan: yesterdayDailyReflection?.tomorrowPlans ?? "",
@@ -93,25 +97,60 @@ struct TodayView: View {
                 }
             }
             .sheet(isPresented: $showingAddTask) {
-                AddTaskView(selectedDate: selectedDate, onSave: {}).environmentObject(dataManager)
+                AddTaskView(selectedDate: selectedDate, onSave: {
+                    syncNewTasksToCalendar()
+                }).environmentObject(dataManager)
             }
             .sheet(isPresented: $showingSmartAdd) {
-                SmartAddTaskView(selectedDate: selectedDate, onSave: {}).environmentObject(dataManager)
+                SmartAddTaskView(selectedDate: selectedDate, onSave: {
+                    syncNewTasksToCalendar()
+                }).environmentObject(dataManager)
             }
             .sheet(item: $editingTask) { task in
-                EditTaskView(task: task, onSave: {}).environmentObject(dataManager)
+                EditTaskView(task: task, onSave: {
+                    if let updatedTask = dataManager.tasks.first(where: { $0.id == task.id }),
+                       let eventId = updatedTask.calendarEventId {
+                        syncManager.updateTaskInCalendar(eventId: eventId, task: updatedTask)
+                    }
+                }).environmentObject(dataManager)
             }
             .sheet(isPresented: $showCalendar) {
                 EnhancedCalendarView().environmentObject(dataManager)
             }
-            .onAppear { updateCachedCalculations(); autoStartLiveActivityIfNeeded() }
-            .onChange(of: selectedDate) { _ in updateCachedCalculations() }
-            .onReceive(dataManager.$tasks) { _ in updateCachedCalculations(); updateLiveActivity() }
+            .onAppear {
+                print("🚀 onAppear triggered, tasks count: \(dataManager.tasks.count), todayTasks: \(todayTasks.count)")
+                calorieCalculationManager.calculateAndUpdateTaskCalories(
+                    for: dataManager.tasks,
+                    dataManager: dataManager
+                )
+                updateCachedCalculations()
+                autoStartLiveActivityIfNeeded()
+                // ✅ 启动时钟：每30秒刷新一次，驱动 currentTask 自动切换
+                startClockTimer()
+                // ✅ 首次进入时为当天所有未完成任务补设通知
+                scheduleNotificationsForTodayTasks()
+            }
+            // ✅ 修复1：去掉 _ in，改为零参数 closure
+            .onChange(of: selectedDate) { updateCachedCalculations() }
+            .onReceive(dataManager.$tasks) { tasks in
+                print("📡 onReceive tasks triggered: \(tasks.count) total, todayTasks: \(todayTasks.count)")
+                updateCachedCalculations()
+                updateLiveActivity()
+                // ✅ 任务列表变化时重新设置通知（添加/编辑/删除均会触发）
+                scheduleNotificationsForTodayTasks()
+            }
             .onReceive(dataManager.$meals) { _ in updateCachedCalculations() }
+            // ✅ 时钟 tick：强制刷新 cachedCalculations，currentTask 跟着变
+            .onChange(of: clockTick) { updateCachedCalculations() }
+            .onReceive(NotificationCenter.default.publisher(for: .openAddTaskSheet)) { _ in
+                selectedDate = Date()
+                focusedField = nil
+                showingAddTask = true
+            }
         }
     }
 
-    // ── Toolbar 按钮 ────────────────────────────────────────
+    // MARK: - Toolbar 按钮
     private func toolbarBtn(_ icon: String, color: Color, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon)
@@ -123,10 +162,9 @@ struct TodayView: View {
         }
     }
 
-    // ── 任务列表卡片 ────────────────────────────────────────
+    // MARK: - 任务列表卡片
     private var taskListCard: some View {
         VStack(spacing: 0) {
-            // 标题行
             HStack(spacing: 6) {
                 Text("今日任务")
                     .font(DS.T.sectionHeader)
@@ -153,7 +191,6 @@ struct TodayView: View {
             .padding(.vertical, 12)
             .background(DS.rowBg)
 
-            // 内容
             if todayTasks.isEmpty {
                 EmptyStateViewWithSmartAdd(
                     showingAddTask: $showingAddTask,
@@ -161,30 +198,57 @@ struct TodayView: View {
                 )
             } else {
                 VStack(spacing: 0) {
-                    ForEach(Array(todayTasks.enumerated()), id: \.element.id) { idx, task in
-                        // 空隙指示
-                        if idx > 0 {
-                            let gap = task.startTime.timeIntervalSince(todayTasks[idx-1].endTime)
-                            if gap > 60 { TimeGapView(gap: gap) }
-                        }
+                    // ✅ currentTask 置顶：如果当前有正在进行的任务，优先展示在最上方
+                    if let current = currentTask {
                         TimelineTaskRow(
-                            task: task,
-                            onToggle: { toggleTaskCompletion(task) },
-                            onEdit:   { focusedField = nil; editingTask = task },
-                            onDelete: { deleteTask(task) },
-                            onPause:  { pauseTask(task) },
-                            isCurrentTask: currentTask?.id == task.id
+                            task: current,
+                            onToggle: { toggleTaskCompletion(current) },
+                            onEdit:   { focusedField = nil; editingTask = current },
+                            onDelete: { deleteTask(current) },
+                            onPause:  { pauseTask(current) },
+                            isCurrentTask: true
                         )
                         .padding(.horizontal, DS.padding)
                         .padding(.vertical, 5)
+                        .background(DS.blue.opacity(0.04))
 
-                        if idx < todayTasks.count - 1 {
-                            Divider()
-                                .padding(.leading, DS.padding + 44)
+                        Divider().padding(.leading, DS.padding + 44)
+                    }
+
+                    // ✅ 其余任务正常排列，跳过已置顶的 currentTask
+                    ForEach(Array(todayTasks.enumerated()), id: \.element.id) { idx, task in
+                        // 跳过已在顶部渲染过的 currentTask
+                        if task.id == currentTask?.id { EmptyView() } else {
+                            if idx > 0 {
+                                let gap = task.startTime.timeIntervalSince(todayTasks[idx-1].endTime)
+                                if gap > 60 { TimeGapView(gap: gap) }
+                            }
+                            TimelineTaskRow(
+                                task: task,
+                                onToggle: { toggleTaskCompletion(task) },
+                                onEdit:   { focusedField = nil; editingTask = task },
+                                onDelete: { deleteTask(task) },
+                                onPause:  { pauseTask(task) },
+                                isCurrentTask: false
+                            )
+                            .padding(.horizontal, DS.padding)
+                            .padding(.vertical, 5)
+
+                            if idx < todayTasks.count - 1 {
+                                Divider().padding(.leading, DS.padding + 44)
+                            }
                         }
                     }
                 }
                 .padding(.bottom, 8)
+                // ✅ 时钟 tick 时检查是否需要自动启动计时器
+                .onChange(of: clockTick) {
+                    if let current = currentTask,
+                       !timerManager.isRunning && !timerManager.isPaused {
+                        let r = current.endTime.timeIntervalSince(Date())
+                        if r > 0 { timerManager.startTimer(duration: r, for: current) }
+                    }
+                }
             }
         }
         .background(DS.cardBg)
@@ -203,8 +267,8 @@ struct TodayView: View {
         }
     }
 
-    // ── 计算属性 ────────────────────────────────────────────
-    var todayTasks: [Task] {
+    // MARK: - 计算属性
+    var todayTasks: [DailyTask] {
         dataManager.tasks
             .filter { Calendar.current.isDate($0.startTime, inSameDayAs: selectedDate) }
             .sorted { $0.startTime < $1.startTime }
@@ -216,12 +280,13 @@ struct TodayView: View {
     var todayDailyReflection: DailyReflection? {
         dataManager.dailyReflections.first { Calendar.current.isDate($0.date, inSameDayAs: selectedDate) }
     }
-    var currentTask: Task? {
+    var currentTask: DailyTask? {
         let now = Date()
         return todayTasks.first { !$0.isCompleted && $0.startTime <= now && $0.endTime > now }
     }
 
-    // ── 方法 ────────────────────────────────────────────────
+    // MARK: - 数据方法
+
     private func updateCachedCalculations() {
         let tasks = todayTasks
         let total = tasks.count, done = tasks.filter { $0.isCompleted }.count
@@ -247,13 +312,23 @@ struct TodayView: View {
         )
     }
 
-    func toggleTaskCompletion(_ task: Task) {
+    func toggleTaskCompletion(_ task: DailyTask) {
         dataManager.toggleTaskCompletion(task)
+        if let updatedTask = dataManager.tasks.first(where: { $0.id == task.id }) {
+            calorieCalculationManager.updateCaloriesForTask(updatedTask, dataManager: dataManager)
+            if let id = updatedTask.calendarEventId {
+                syncManager.updateTaskInCalendar(eventId: id, task: updatedTask)
+            }
+            // 任务标为完成时：如果计时器正在为该任务（或无绑定）计时，
+            // 走完整完成流程（发通知 + 停止），而不是悄悄 stopTimer
+            if updatedTask.isCompleted {
+                timerManager.completeForTask(task)
+            }
+        }
         updateCachedCalculations()
-        if let id = task.calendarEventId { syncManager.updateTaskInCalendar(eventId: id, task: task) }
-        if task.id == currentTask?.id { timerManager.stopTimer() }
     }
-    func pauseTask(_ task: Task) {
+
+    func pauseTask(_ task: DailyTask) {
         if timerManager.isRunning { timerManager.pauseTimer() }
         else if let i = dataManager.tasks.firstIndex(where: { $0.id == task.id }) {
             dataManager.tasks[i].actualStartTime = Date()
@@ -265,14 +340,27 @@ struct TodayView: View {
             dataManager.saveAllData()
         }
     }
-    func deleteTask(_ task: Task) {
-        if let id = task.calendarEventId { syncManager.deleteTaskFromCalendar(eventId: id) }
+
+    func deleteTask(_ task: DailyTask) {
+        let calendarEventId = task.calendarEventId
         dataManager.deleteTask(task)
+        if let id = calendarEventId { syncManager.deleteTaskFromCalendar(eventId: id) }
     }
+
+    // ✅ 新增：同步今日所有尚未写入日历的任务（AddTask / SmartAdd 保存后调用）
+    private func syncNewTasksToCalendar() {
+        guard syncManager.isCalendarSyncEnabled else { return }
+        for task in todayTasks where task.calendarEventId == nil {
+            _ = syncManager.addTaskToCalendar(task)
+        }
+    }
+
     func updateDailyReflection(todayLearnings: String? = nil, tomorrowPlans: String? = nil) {
         let r = cachedCalculations?.totalRevenue ?? 0
         let e = cachedCalculations?.totalExpense ?? 0
-        if let i = dataManager.dailyReflections.firstIndex(where: { Calendar.current.isDate($0.date, inSameDayAs: selectedDate) }) {
+        if let i = dataManager.dailyReflections.firstIndex(where: {
+            Calendar.current.isDate($0.date, inSameDayAs: selectedDate)
+        }) {
             if let tl = todayLearnings { dataManager.dailyReflections[i].todayLearnings = tl }
             if let tp = tomorrowPlans  { dataManager.dailyReflections[i].tomorrowPlans  = tp }
             dataManager.dailyReflections[i].totalRevenue = r
@@ -286,15 +374,18 @@ struct TodayView: View {
         }
         dataManager.saveAllData()
     }
+
     private func autoStartLiveActivityIfNeeded() {
-        guard #available(iOS 16.1, *) else { return }
+        guard #available(iOS 16.2, *) else { return }
         if !hasAutoStartedLiveActivity && !todayTasks.isEmpty {
             LiveActivityManager.shared.start(tasks: todayTasks, mood: "专注", username: "小艺")
             hasAutoStartedLiveActivity = true
         }
     }
+
     private func updateLiveActivity() {
-        guard #available(iOS 16.1, *) else { return }
+        print("🔍 updateLiveActivity called, todayTasks: \(todayTasks.count), isActive: \(LiveActivityManager.shared.isActive)")
+        guard #available(iOS 16.2, *) else { return }
         if !todayTasks.isEmpty {
             if !hasAutoStartedLiveActivity {
                 LiveActivityManager.shared.start(tasks: todayTasks, mood: "专注", username: "小艺")
@@ -307,6 +398,39 @@ struct TodayView: View {
             hasAutoStartedLiveActivity = false
         }
     }
+
+    // ✅ 新增：启动时钟，每30秒触发一次，驱动 currentTask 自动切换
+    private func startClockTimer() {
+        clockTimer?.invalidate()
+        clockTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in
+            Task { @MainActor in
+                clockTick = Date()
+            }
+        }
+    }
+
+    // ✅ 新增：为今日所有未完成任务设置通知
+    private func scheduleNotificationsForTodayTasks() {
+        let nm = NotificationManager.shared
+        guard nm.isAuthorized else {
+            // 没有权限时异步请求，获得授权后不会自动重试（用户下次进入会再触发 onAppear）
+            Task { await nm.requestAuthorization() }
+            return
+        }
+        for task in todayTasks where !task.isCompleted {
+            nm.reschedule(for: task)
+        }
+    }
+}
+
+// ============================================================
+// MARK: - DailyTask 遵循 NotifiableTask 协议
+// ✅ 让 NotificationManager.reschedule(for:) 能直接接受 DailyTask
+// ============================================================
+extension DailyTask: NotifiableTask {
+    // DailyTask 本身没有 deadline 概念，返回 nil 即可
+    // NotificationManager 会跳过 deadline 通知
+    var deadlineDate: Date? { nil }
 }
 
 // ============================================================
@@ -321,7 +445,6 @@ struct TaskProgressBanner: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            // 环形进度
             ZStack {
                 Circle().stroke(DS.rowBg, lineWidth: 5).frame(width: 44, height: 44)
                 Circle()
@@ -337,7 +460,7 @@ struct TaskProgressBanner: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(isDone ? "全部完成 🎉" : "今日进度")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(DS.T.sectionHeader)
                 Text("\(completedTasks) / \(totalTasks) 个任务")
                     .font(DS.T.caption).foregroundColor(.secondary)
             }
@@ -385,7 +508,9 @@ struct CalendarEntryCard: View {
         dataManager.tasks.filter { Calendar.current.isDate($0.startTime, inSameDayAs: selectedDate) }.count
     }
     private var doneCount: Int {
-        dataManager.tasks.filter { Calendar.current.isDate($0.startTime, inSameDayAs: selectedDate) && $0.isCompleted }.count
+        dataManager.tasks.filter {
+            Calendar.current.isDate($0.startTime, inSameDayAs: selectedDate) && $0.isCompleted
+        }.count
     }
 
     private static let dateFmt: DateFormatter = {
@@ -401,11 +526,10 @@ struct CalendarEntryCard: View {
     var body: some View {
         Button(action: onTap) {
             VStack(spacing: 11) {
-                // 顶部信息行
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(Self.dateFmt.string(from: selectedDate))
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(DS.T.cardTitle)
                             .foregroundColor(.primary)
                         Text(taskCount > 0 ? "\(doneCount)/\(taskCount) 个任务完成" : "点击查看完整日历")
                             .font(DS.T.caption)
@@ -426,7 +550,6 @@ struct CalendarEntryCard: View {
                     .cornerRadius(8)
                 }
 
-                // 本周迷你日历
                 HStack(spacing: 0) {
                     ForEach(weekDays, id: \.self) { day in
                         let isSel   = Calendar.current.isDate(day, inSameDayAs: selectedDate)
@@ -469,7 +592,7 @@ struct CalendarEntryCard: View {
 // MARK: - 时间轴任务行
 // ============================================================
 struct TimelineTaskRow: View {
-    let task: Task
+    let task: DailyTask
     let onToggle: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
@@ -477,6 +600,7 @@ struct TimelineTaskRow: View {
     let isCurrentTask: Bool
 
     @State private var now = Date()
+    @State private var tickTimer: Timer? = nil
     @StateObject private var timerManager = TimerManager.shared
 
     private var progress: Double {
@@ -518,7 +642,6 @@ struct TimelineTaskRow: View {
 
             // 任务内容气泡
             VStack(alignment: .leading, spacing: 6) {
-                // 标题行
                 HStack(alignment: .top) {
                     Button(action: onToggle) {
                         Image(systemName: task.isCompleted ? "checkmark.circle.fill" : "circle")
@@ -529,11 +652,11 @@ struct TimelineTaskRow: View {
 
                     VStack(alignment: .leading, spacing: 3) {
                         Text(task.title)
-                            .font(.system(size: 16, weight: .medium))
+                            .font(DS.T.body)
+                            .fontWeight(.medium)
                             .strikethrough(task.isCompleted)
                             .foregroundColor(task.isCompleted ? .secondary : .primary)
 
-                        // 标签 chips
                         HStack(spacing: 6) {
                             chip("\(Int(task.duration))分", icon: "clock", color: DS.blue)
                             if !task.category.isEmpty {
@@ -554,7 +677,6 @@ struct TimelineTaskRow: View {
                     Spacer(minLength: 0)
                 }
 
-                // 当前任务：进度 + 控制
                 if isCurrentTask && !task.isCompleted {
                     VStack(spacing: 6) {
                         GeometryReader { geo in
@@ -574,7 +696,8 @@ struct TimelineTaskRow: View {
                                     Image(systemName: timerManager.isRunning ? "pause.fill" : "play.fill")
                                         .font(.system(size: 12, weight: .bold))
                                     Text(timerManager.isRunning ? "暂停" : "继续")
-                                        .font(.system(size: 13, weight: .semibold))
+                                        .font(DS.T.caption)
+                                        .fontWeight(.semibold)
                                 }
                                 .foregroundColor(.white)
                                 .padding(.horizontal, DS.paddingS)
@@ -620,16 +743,15 @@ struct TimelineTaskRow: View {
                 tick()
             }
         }
-        .onChange(of: isCurrentTask) { if $0 { tick() } }
+        // ✅ 修复2：新双参数形式，用 newValue 取代旧的 $0
+        .onChange(of: isCurrentTask) { _, newValue in if newValue { tick() } }
     }
 
     @ViewBuilder
     private func chip(_ text: String, icon: String?, color: Color) -> some View {
         HStack(spacing: 3) {
-            if let ic = icon {
-                Image(systemName: ic).font(.system(size: 11))
-            }
-            Text(text).font(.system(size: 13, weight: .medium))
+            if let ic = icon { Image(systemName: ic).font(.system(size: 11)) }
+            Text(text).font(DS.T.caption).fontWeight(.medium)
         }
         .foregroundColor(color)
         .padding(.horizontal, 7).padding(.vertical, 3)
@@ -637,12 +759,22 @@ struct TimelineTaskRow: View {
         .cornerRadius(5)
     }
 
+    // ✅ 最终修复：tickTimer 存为 @State，callback 里完全不捕获 timer 引用
+    //    SwiftUI @State 在主线程访问，Timer callback 通过 MainActor.run 回主线程
+    // ✅ struct 不需要 weak self，不会循环引用
     private func tick() {
-        Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { t in
-            now = Date()
-            if !isCurrentTask { t.invalidate() }
+        tickTimer?.invalidate()
+        tickTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
+            Task { @MainActor in
+                now = Date()
+                if !isCurrentTask {
+                    tickTimer?.invalidate()
+                    tickTimer = nil
+                }
+            }
         }
     }
+
     private func fmt(_ d: Date) -> String {
         let f = DateFormatter(); f.dateFormat = "HH:mm"; return f.string(from: d)
     }
@@ -666,7 +798,7 @@ struct TimeGapView: View {
                     .font(.system(size: 13))
                     .foregroundColor(.secondary)
                 Text("空闲 \(label)")
-                    .font(.system(size: 13))
+                    .font(DS.T.caption)
                     .foregroundColor(.secondary)
             }
             .padding(.horizontal, DS.paddingS)
@@ -710,7 +842,6 @@ struct CollapsibleReflectionBox: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // 标题行
             Button {
                 withAnimation(.easeInOut(duration: 0.25)) { isExpanded.toggle() }
             } label: {
@@ -764,7 +895,7 @@ struct CollapsibleReflectionBox: View {
         VStack(alignment: .leading, spacing: 6) {
             blockLabel(title, icon: icon, color: iconColor)
             Text(content)
-                .font(.system(size: 14))
+                .font(DS.T.cardTitle)
                 .foregroundColor(.primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -778,12 +909,12 @@ struct CollapsibleReflectionBox: View {
             ZStack(alignment: .topLeading) {
                 if text.wrappedValue.isEmpty {
                     Text(placeholder)
-                        .font(.system(size: 14))
+                        .font(DS.T.cardTitle)
                         .foregroundColor(Color(.placeholderText))
                         .padding(.top, 9).padding(.leading, 5)
                 }
                 TextEditor(text: text)
-                    .font(.system(size: 14))
+                    .font(DS.T.cardTitle)
                     .frame(minHeight: 64)
                     .focused($focusedField, equals: field)
             }
@@ -815,7 +946,7 @@ struct ReflectionSection: View {
                 Image(systemName: icon).font(.system(size: 11)).foregroundColor(iconColor)
                 Text(title).font(DS.T.micro).foregroundColor(.secondary)
             }
-            Text(content).font(.system(size: 14)).foregroundColor(.primary)
+            Text(content).font(DS.T.cardTitle).foregroundColor(.primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -834,7 +965,7 @@ struct ReflectionInputSection: View {
                 Text(title).font(DS.T.micro).foregroundColor(.secondary)
             }
             TextEditor(text: $text)
-                .font(.system(size: 14))
+                .font(DS.T.cardTitle)
                 .frame(minHeight: 64)
                 .padding(9).background(DS.rowBg)
                 .cornerRadius(DS.radius - 2)

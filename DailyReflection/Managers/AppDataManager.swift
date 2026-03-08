@@ -1,46 +1,16 @@
 import Foundation
 import Combine
-// [file name]: AppDataManager.swift
-// 在文件末尾添加 App Group 相关扩展
-
-extension AppDataManager {
-    // MARK: - App Group 常量
-    
-    
-    // MARK: - App Group 数据同步（Widget 使用）
-    
-    /// 保存数据到 App Group（供 Widget 使用）
-    
-        
-       
-    
-    /// 从 App Group 加载数据
-    func loadFromAppGroup() {
-        guard let sharedDefaults = UserDefaults(suiteName: AppDataManager.appGroupID) else {
-            print("❌ 无法访问 App Group")
-            return
-        }
-        
-        // 注意：AppDataManager 本身从本地 UserDefaults 加载数据
-        // 这个方法主要是为了初始化时确保 App Group 有数据
-        if let encodedTasks = sharedDefaults.data(forKey: "tasks"),
-           let decodedTasks = try? JSONDecoder().decode([Task].self, from: encodedTasks) {
-            // 可以选择性地合并数据，这里我们以本地为主
-            print("✅ 从 App Group 加载了 \(decodedTasks.count) 个任务")
-        }
-    }
-}
 
 final class AppDataManager: ObservableObject {
     static let shared = AppDataManager()
 
     public init() {
-        loadData()          // 本地数据
-        loadFromAppGroup()  // AppGroup 数据（Widget）
+        loadData()
+        loadFromAppGroup()
     }
 
     @Published var dailyReflections: [DailyReflection] = []
-    @Published var tasks: [Task] = []
+    @Published var tasks: [DailyTask] = []
     @Published var meals: [MealEntry] = []
     @Published var weights: [WeightEntry] = []
     @Published var reflections: [Reflection] = []
@@ -50,25 +20,11 @@ final class AppDataManager: ObservableObject {
     func getEventsForDate(_ date: Date) -> CalendarEvent {
         let calendar = Calendar.current
 
-        let dayTasks = tasks.filter { task in
-            calendar.isDate(task.date, inSameDayAs: date)
-        }
-
-        let dayMeals = meals.filter { meal in
-            calendar.isDate(meal.date, inSameDayAs: date)
-        }
-
-        let dayWeight = weights.first { weight in
-            calendar.isDate(weight.date, inSameDayAs: date)
-        }
-
-        let dayReflection = reflections.first { reflection in
-            calendar.isDate(reflection.date, inSameDayAs: date)
-        }
-
-        let dayDailyReflection = dailyReflections.first { reflection in
-            calendar.isDate(reflection.date, inSameDayAs: date)
-        }
+        let dayTasks = tasks.filter { calendar.isDate($0.date, inSameDayAs: date) }
+        let dayMeals = meals.filter { calendar.isDate($0.date, inSameDayAs: date) }
+        let dayWeight = weights.first { calendar.isDate($0.date, inSameDayAs: date) }
+        let dayReflection = reflections.first { calendar.isDate($0.date, inSameDayAs: date) }
+        let dayDailyReflection = dailyReflections.first { calendar.isDate($0.date, inSameDayAs: date) }
 
         var combinedReflection = dayReflection
         if let daily = dayDailyReflection {
@@ -98,77 +54,62 @@ final class AppDataManager: ObservableObject {
         )
     }
 
-    // MARK: - CRUD Tasks (统一入口)
+    // MARK: - CRUD Tasks
 
-    /// ✅ 添加任务：保存 + AppGroup + LiveActivity + 日历同步
-    func addTask(_ task: Task) {
-        var newTask = task
-
-        // 🆕 同步到日历（先同步再保存 eventId）
+    func addTask(_ task: DailyTask) {
+        // ✅ 修复：去掉 newTask.calendarEventId = eventId 赋值
+        //    CalendarSyncManager.addTaskToCalendar 内部已直接写入 UserDefaults
+        //    calendarEventId 是只读 computed property，通过 UserDefaults getter 读取
         if CalendarSyncManager.shared.isCalendarSyncEnabled {
-            if let eventId = CalendarSyncManager.shared.addTaskToCalendar(newTask) {
-                newTask.calendarEventId = eventId
-            }
+            _ = CalendarSyncManager.shared.addTaskToCalendar(task)
         }
 
-        tasks.append(newTask)
-
+        tasks.append(task)
         saveAllData()
         saveToAppGroup()
 
-        // 更新 Live Activity
-        if #available(iOS 16.1, *) {
+        if #available(iOS 16.2, *) {
             updateLiveActivity()
         }
     }
 
-    /// 更新任务并同步
-    func updateTask(_ task: Task) {
+    func updateTask(_ task: DailyTask) {
         if let index = tasks.firstIndex(where: { $0.id == task.id }) {
             tasks[index] = task
-
             saveAllData()
             saveToAppGroup()
 
-            if #available(iOS 16.1, *) {
+            if #available(iOS 16.2, *) {
                 updateLiveActivity()
             }
         }
     }
 
-    /// 删除任务（基础）
-    func deleteTask(_ task: Task) {
+    func deleteTask(_ task: DailyTask) {
         tasks.removeAll { $0.id == task.id }
         saveAllData()
         saveToAppGroup()
 
-        if #available(iOS 16.1, *) {
+        if #available(iOS 16.2, *) {
             updateLiveActivity()
         }
     }
-    
-    func deleteTaskAndSync(_ task: Task) {
-        // 从日历删除
+
+    func deleteTaskAndSync(_ task: DailyTask) {
         if let eventId = task.calendarEventId {
             CalendarSyncManager.shared.deleteTaskFromCalendar(eventId: eventId)
         }
-        
-        // 从数据中删除
         deleteTask(task)
     }
 
-    /// 切换完成状态
-    func toggleTaskCompletion(_ task: Task) {
+    func toggleTaskCompletion(_ task: DailyTask) {
         if let index = tasks.firstIndex(where: { $0.id == task.id }) {
             tasks[index].isCompleted.toggle()
-
             saveAllData()
             saveToAppGroup()
 
-            if #available(iOS 16.1, *) {
+            if #available(iOS 16.2, *) {
                 updateLiveActivity()
-
-                // 如果全部完成，结束 Live Activity（可选）
                 if tasks.allSatisfy({ $0.isCompleted }) {
                     let mood = getCurrentMood()
                     LiveActivityManager.shared.endWithDelay(tasks: tasks, mood: mood)
@@ -181,6 +122,7 @@ final class AppDataManager: ObservableObject {
 
     func saveAllData() {
         saveData()
+        saveToAppGroup()
     }
 
     func saveData() {
@@ -199,32 +141,25 @@ final class AppDataManager: ObservableObject {
         if let encoded = try? JSONEncoder().encode(dailyReflections) {
             UserDefaults.standard.set(encoded, forKey: "dailyReflections")
         }
-
-        // ✅ 每次保存本地也同步到 AppGroup
-        saveToAppGroup()
     }
 
     func loadData() {
         if let data = UserDefaults.standard.data(forKey: "tasks"),
-           let decoded = try? JSONDecoder().decode([Task].self, from: data) {
+           let decoded = try? JSONDecoder().decode([DailyTask].self, from: data) {
             tasks = decoded
         }
-
         if let data = UserDefaults.standard.data(forKey: "meals"),
            let decoded = try? JSONDecoder().decode([MealEntry].self, from: data) {
             meals = decoded
         }
-
         if let data = UserDefaults.standard.data(forKey: "weights"),
            let decoded = try? JSONDecoder().decode([WeightEntry].self, from: data) {
             weights = decoded
         }
-
         if let data = UserDefaults.standard.data(forKey: "reflections"),
            let decoded = try? JSONDecoder().decode([Reflection].self, from: data) {
             reflections = decoded
         }
-
         if let data = UserDefaults.standard.data(forKey: "dailyReflections"),
            let decoded = try? JSONDecoder().decode([DailyReflection].self, from: data) {
             dailyReflections = decoded
@@ -235,26 +170,22 @@ final class AppDataManager: ObservableObject {
 // MARK: - Live Activity Helper
 
 extension AppDataManager {
-    @available(iOS 16.1, *)
-    fileprivate func updateLiveActivity() {
+    @available(iOS 16.2, *)
+    func updateLiveActivity() {
         let mood = getCurrentMood()
         LiveActivityManager.shared.update(tasks: tasks, mood: mood)
     }
 
-    fileprivate func getCurrentMood() -> String {
-        // 1) 最新 reflection
+    func getCurrentMood() -> String {
         if let latestReflection = reflections.max(by: { $0.date < $1.date }),
            !latestReflection.overallSummary.isEmpty {
             return latestReflection.overallSummary
         }
-
-        // 2) AppGroup 兜底
         if let sharedDefaults = UserDefaults(suiteName: AppDataManager.appGroupID),
            let savedMood = sharedDefaults.string(forKey: "currentMood"),
            !savedMood.isEmpty {
             return savedMood
         }
-
         return "平静"
     }
 }

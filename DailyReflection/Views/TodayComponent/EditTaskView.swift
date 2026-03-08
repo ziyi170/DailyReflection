@@ -4,7 +4,7 @@ struct EditTaskView: View {
     @EnvironmentObject var dataManager: AppDataManager
     @StateObject private var whiteNoiseManager = WhiteNoiseManager.shared
 
-    let task: Task
+    let task: DailyTask
     let onSave: () -> Void
     @Environment(\.dismiss) var dismiss
 
@@ -30,24 +30,24 @@ struct EditTaskView: View {
 
     let categories = ["工作", "学习", "健身", "娱乐", "其他"]
 
-    init(task: Task, onSave: @escaping () -> Void) {
-        self.task = task
+    init(task dailyTask: DailyTask, onSave: @escaping () -> Void) {
+        self.task = dailyTask
         self.onSave = onSave
 
-        _title = State(initialValue: task.title)
-        _startTime = State(initialValue: task.startTime)
+        _title = State(initialValue: dailyTask.title)
+        _startTime = State(initialValue: dailyTask.startTime)
 
         // ✅ Task.duration 已经是分钟：这里不要 /60
-        _duration = State(initialValue: task.duration)
+        _duration = State(initialValue: dailyTask.duration)
 
-        _revenue = State(initialValue: task.revenue > 0 ? String(format: "%.2f", task.revenue) : "")
-        _expense = State(initialValue: task.expense > 0 ? String(format: "%.2f", task.expense) : "")
-        _caloriesBurned = State(initialValue: task.caloriesBurned > 0 ? String(format: "%.0f", task.caloriesBurned) : "")
-        _category = State(initialValue: task.category)
-        _notes = State(initialValue: task.notes)
+        _revenue = State(initialValue: dailyTask.revenue > 0 ? String(format: "%.2f", dailyTask.revenue) : "")
+        _expense = State(initialValue: dailyTask.expense > 0 ? String(format: "%.2f", dailyTask.expense) : "")
+        _caloriesBurned = State(initialValue: dailyTask.caloriesBurned > 0 ? String(format: "%.0f", dailyTask.caloriesBurned) : "")
+        _category = State(initialValue: dailyTask.category)
+        _notes = State(initialValue: dailyTask.notes)
 
-        _enableWhiteNoise = State(initialValue: task.enableWhiteNoise)
-        _selectedSound = State(initialValue: task.whiteNoiseType ?? .rain)
+        _enableWhiteNoise = State(initialValue: dailyTask.enableWhiteNoise)
+        _selectedSound = State(initialValue: dailyTask.whiteNoiseType ?? .rain)
     }
 
     var body: some View {
@@ -256,6 +256,12 @@ struct EditTaskView: View {
 
             whiteNoiseManager.stop()
             dataManager.saveAllData()
+            
+            // ✅ 同步更新到日历
+            if let eventId = updatedTask.calendarEventId {
+                CalendarSyncManager.shared.updateTaskInCalendar(eventId: eventId, task: updatedTask)
+            }
+            
             onSave()
         }
         dismiss()
@@ -282,7 +288,7 @@ struct EditTaskView: View {
         }
     }
 
-    func deleteTask() {
+    func deleteTask() { // renamed below
         dataManager.deleteTask(task)
         whiteNoiseManager.stop()
         onSave()

@@ -32,7 +32,14 @@
     
     <key>LSRequiresIPhoneOS</key>
     <true/>
-    
+    <key>NSSupportsLiveActivities</key>
+
+    <key>NSSupportsLiveActivities</key>
+    <true/>
+
+    <key>NSSupportsLiveActivitiesFrequentUpdates</key>
+    <true/>
+
     <key>MinimumOSVersion</key>
     <string>16.0</string>
     

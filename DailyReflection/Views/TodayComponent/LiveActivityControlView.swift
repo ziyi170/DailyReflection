@@ -22,7 +22,7 @@ struct LiveActivityControlView: View {
     }
 
     // 下一个未完成任务
-    private var nextTask: Task? {
+    private var nextTask: DailyTask? {
         dataManager.tasks.first(where: { !$0.isCompleted })
     }
 
